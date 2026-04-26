@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Valve Tycoon</title>
+</head>
+<body style="margin:0; overflow:hidden; background:#111;">
+<canvas id="game"></canvas>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener("resize", resize);
+
+function loadImage(src) {
+  const img = new Image();
+  img.src = src;
+  return img;
+}
+
+const images = {
+  titleSprite: loadImage("images/bad-valve-sprite.png"),
+
+  background1: loadImage("images/background1.png"),
+  background2: loadImage("images/background2.png"),
+  background3: loadImage("images/background3.png"),
+
+  bad: loadImage("images/bad.png"),
+  dss: loadImage("images/dss.png"),
+  pinch: loadImage("images/pinch.png"),
+  msBall: loadImage("images/ms-ball.png"),
+  tripleOffset: loadImage("images/triple-offset.png"),
+  globe: loadImage("images/globe.png"),
+
+  dssActuated: loadImage("images/dss-actuated.png"),
+  tripleOffsetActuated: loadImage("images/triple-offset-actuated.png"),
+  msBallActuated: loadImage("images/ms-ball-actuated.png"),
+
+  player: loadImage("images/player.png"),
+  playerThumbs: loadImage("images/player-thumbs-up.png")
+};
+
+let gameState = "title";
+let mouseX = 0;
+let mouseY = 0;
+let startFlash = 0;
+
+let titleFrame = 0;
+let titleFrameTimer = 0;
+const titleFrameSpeed = 6;
+const titleFrameWidth = 64;
+const titleFrameHeight = 64;
+const titleFrameCount = 8;
+
+let titleParticles = [];
+let victoryConfetti = [];
+
+function createTitleParticles() {
+  titleParticles = [];
+
+  for (let i = 0; i < 70; i++) {
+    titleParticles.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      size: 1 + Math.random() * 3,
+      speed: 0.2 + Math.random() * 0.7,
+      alpha: 0.15 + Math.random() * 0.55
+    });
+  }
+}
+
+function createVictoryConfetti() {
+  victoryConfetti = [];
+
+  const colors = ["cyan", "lime", "yellow", "white", "orange", "purple"];
+
+  for (let i = 0; i < 140; i++) {
+    victoryConfetti.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * -canvas.height,
+      size: 4 + Math.random() * 8,
+      speed: 2 + Math.random() * 5,
+      drift: -2 + Math.random() * 4,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      rotation: Math.random() * Math.PI * 2,
+      spin: -0.08 + Math.random() * 0.16
+    });
+  }
+}
+
+createTitleParticles();
+createVictoryConfetti();
+
+window.addEventListener("resize", () => {
+  createTitleParticles();
+  createVictoryConfetti();
+});
+
+const playButton = {
+  x: 0,
+  y: 0,
+  width: 280,
+  height: 75
+};
+
+const backButton = {
+  x: 0,
+  y: 0,
+  width: 330,
+  height: 75
+};
+
+canvas.addEventListener("mousemove", e => {
+  const rect = canvas.getBoundingClientRect();
+  mouseX = e.clientX - rect.left;
+  mouseY = e.clientY - rect.top;
+});
+
+canvas.addEventListener("click", () => {
+  if (gameState === "title") {
+    const hovering =
+      mouseX >= playButton.x &&
+      mouseX <= playButton.x + playButton.width &&
+      mouseY >= playButton.y &&
+      mouseY <= playButton.y + playButton.height;
+
+    if (hovering) {
+      resetGame();
+      startFlash = 18;
+      gameState = "playing";
+    }
+  }
+
+  if (gameState === "victory") {
+    const hovering =
+      mouseX >= backButton.x &&
+      mouseX <= backButton.x + backButton.width &&
+      mouseY >= backButton.y &&
+      mouseY <= backButton.y + backButton.height;
+
+    if (hovering) {
+      resetGame();
+      createVictoryConfetti();
+      gameState = "title";
+    }
+  }
+});
+
+const stages = [
+  {
+    name: "Slurry Line",
+    condition: "Abrasive + high solids",
+    spawnRate: 500,
+    badSpeedMultiplier: 1.3,
+    background: images.background1,
+    badFallPoints: 1,
+    goodChance: 0.2,
+    badDamage: 1,
+    badValves: [
+      { name: "Cheap KG", image: images.bad },
+      { name: "Ball Valve", image: images.bad },
+      { name: "Butterfly", image: images.bad }
+    ],
+    goodValves: [
+      {
+        name: "SSKGV",
+        power: "shieldClear",
+        image: images.dss,
+        aura: "yellow",
+        popupText: "Shield + Clear!"
+      },
+      {
+        name: "Pinch",
+        power: "points",
+        image: images.pinch,
+        aura: "cyan",
+        popupText: "Bonus Points!"
+      }
+    ]
+  },
+  {
+    name: "Steam Line",
+    condition: "High temperature + pressure",
+    spawnRate: 350,
+    badSpeedMultiplier: 2.4,
+    background: images.background2,
+    badFallPoints: 3,
+    goodChance: 0.08,
+    badDamage: 2,
+    badValves: [
+      { name: "Plastic Valve", image: images.bad },
+      { name: "Soft Seat", image: images.bad },
+      { name: "Cheap Butterfly", image: images.bad }
+    ],
+    goodValves: [
+      {
+        name: "Metal Seated",
+        power: "shieldClear",
+        image: images.msBall,
+        aura: "yellow",
+        popupText: "Shield + Clear!"
+      },
+      {
+        name: "Triple Offset",
+        power: "speed",
+        image: images.tripleOffset,
+        aura: "lime",
+        popupText: "Speed Boost!"
+      },
+      {
+        name: "Globe",
+        power: "points",
+        image: images.globe,
+        aura: "cyan",
+        popupText: "Bonus Points!"
+      }
+    ]
+  },
+  {
+    name: "Canadian Oilsands Site",
+    condition: "Bitumen + abrasion + severe service",
+    spawnRate: 260,
+    badSpeedMultiplier: 2.8,
+    background: images.background3,
+    badFallPoints: 5,
+    goodChance: 0.06,
+    badDamage: 2,
+    badValves: [
+      { name: "Soft Seat", image: images.bad },
+      { name: "Cheap KG", image: images.bad },
+      { name: "Wrong Trim", image: images.bad },
+      { name: "Plugged Valve", image: images.bad }
+    ],
+    goodValves: [
+      {
+        name: "Pneumatic SSKGV",
+        power: "shieldClear",
+        image: images.dssActuated,
+        aura: "yellow",
+        popupText: "Shield + Clear!"
+      },
+      {
+        name: "Pneumatic Triple Act.",
+        power: "speed",
+        image: images.tripleOffsetActuated,
+        aura: "lime",
+        popupText: "Actuated Speed!"
+      },
+      {
+        name: "Pneumatic Metal Seated",
+        power: "heal",
+        image: images.msBallActuated,
+        aura: "purple",
+        popupText: "Health +1!"
+      }
+    ]
+  }
+];
+
+let currentStage = 0;
+
+let player = {
+  x: canvas.width / 2,
+  y: canvas.height - 100,
+  size: 80,
+  speed: 7,
+  normalSpeed: 7,
+  boostSpeed: 14,
+  speedBoost: 0,
+  health: 6,
+  shield: 0
+};
+
+let keys = {};
+let valves = [];
+let score = 0;
+let gameOver = false;
+let timeLeft = 60;
+let stageWon = false;
+let spawnTimer = 0;
+let hitFlash = 0;
+let powerFlash = { timer: 0, color: "cyan" };
+
+let popup = {
+  text: "",
+  timer: 0,
+  color: "white",
+  maxTimer: 70
+};
+
+document.addEventListener("keydown", e => {
+  keys[e.key.toLowerCase()] = true;
+
+  if (stageWon && e.key.toLowerCase() === "n") {
+    nextStage();
+  }
+});
+
+document.addEventListener("keyup", e => {
+  keys[e.key.toLowerCase()] = false;
+});
+
+function showPopup(text, color) {
+  popup.text = text;
+  popup.color = color;
+  popup.timer = popup.maxTimer;
+}
+
+function resetGame() {
+  currentStage = 0;
+  valves = [];
+  score = 0;
+  gameOver = false;
+  timeLeft = 60;
+  stageWon = false;
+  spawnTimer = 0;
+  hitFlash = 0;
+  powerFlash.timer = 0;
+  popup.timer = 0;
+
+  player.health = 6;
+  player.shield = 0;
+  player.speedBoost = 0;
+  player.speed = player.normalSpeed;
+  player.x = canvas.width / 2;
+  player.y = canvas.height - 100;
+}
+
+function nextStage() {
+  currentStage++;
+
+  if (currentStage >= stages.length) {
+    gameState = "victory";
+    createVictoryConfetti();
+    return;
+  }
+
+  valves = [];
+  timeLeft = 60;
+  stageWon = false;
+  spawnTimer = 0;
+  hitFlash = 0;
+  powerFlash.timer = 0;
+  popup.timer = 0;
+
+  player.shield = 0;
+  player.speedBoost = 0;
+  player.speed = player.normalSpeed;
+  player.x = canvas.width / 2;
+  player.y = canvas.height - 100;
+}
+
+function spawnValve() {
+  if (gameState !== "playing" || gameOver || stageWon) return;
+
+  const stage = stages[currentStage];
+  const isGood = Math.random() < stage.goodChance;
+
+  const type = isGood
+    ? stage.goodValves[Math.floor(Math.random() * stage.goodValves.length)]
+    : stage.badValves[Math.floor(Math.random() * stage.badValves.length)];
+
+  valves.push({
+    x: Math.random() * (canvas.width - 90),
+    y: -110,
+    size: currentStage === 2 ? 100 : 90,
+    speed: isGood ? 3 : (4 + Math.random() * 3) * stage.badSpeedMultiplier,
+    good: isGood,
+    name: type.name,
+    power: type.power || null,
+    image: type.image,
+    aura: type.aura || "red",
+    popupText: type.popupText || "",
+    rotation: Math.random() * Math.PI * 2,
+    spin: (Math.random() - 0.5) * 0.08,
+    pulse: Math.random() * Math.PI * 2
+  });
+}
+
+setInterval(() => {
+  if (gameState === "playing" && !gameOver && !stageWon) {
+    timeLeft--;
+
+    if (timeLeft <= 0) {
+      stageWon = true;
+    }
+  }
+}, 1000);
+
+function updateTitleParticles() {
+  for (let p of titleParticles) {
+    p.y -= p.speed;
+
+    if (p.y < -10) {
+      p.y = canvas.height + 10;
+      p.x = Math.random() * canvas.width;
+    }
+  }
+}
+
+function updateVictoryConfetti() {
+  for (let c of victoryConfetti) {
+    c.y += c.speed;
+    c.x += c.drift;
+    c.rotation += c.spin;
+
+    if (c.y > canvas.height + 20) {
+      c.y = -20;
+      c.x = Math.random() * canvas.width;
+    }
+
+    if (c.x < -20) c.x = canvas.width + 20;
+    if (c.x > canvas.width + 20) c.x = -20;
+  }
+}
+
+function update() {
+  if (gameState === "title") {
+    titleFrameTimer++;
+
+    if (titleFrameTimer >= titleFrameSpeed) {
+      titleFrame = (titleFrame + 1) % titleFrameCount;
+      titleFrameTimer = 0;
+    }
+
+    updateTitleParticles();
+    return;
+  }
+
+  if (gameState === "victory") {
+    updateVictoryConfetti();
+    return;
+  }
+
+  if (startFlash > 0) startFlash--;
+
+  if (gameOver || stageWon) return;
+
+  const stage = stages[currentStage];
+
+  spawnTimer++;
+
+  if (spawnTimer > stage.spawnRate / 10) {
+    spawnValve();
+    spawnTimer = 0;
+  }
+
+  if (hitFlash > 0) hitFlash--;
+  if (powerFlash.timer > 0) powerFlash.timer--;
+  if (popup.timer > 0) popup.timer--;
+  if (player.shield > 0) player.shield--;
+
+  if (player.speedBoost > 0) {
+    player.speedBoost--;
+    player.speed = player.boostSpeed;
+  } else {
+    player.speed = player.normalSpeed;
+  }
+
+  if (keys["arrowleft"] || keys["a"]) player.x -= player.speed;
+  if (keys["arrowright"] || keys["d"]) player.x += player.speed;
+
+  player.x = Math.max(0, Math.min(canvas.width - player.size, player.x));
+
+  for (let i = valves.length - 1; i >= 0; i--) {
+    let v = valves[i];
+
+    v.y += v.speed;
+    v.rotation += v.spin;
+    v.pulse += 0.08;
+
+    const hitPlayer =
+      player.x < v.x + v.size &&
+      player.x + player.size > v.x &&
+      player.y < v.y + v.size &&
+      player.y + player.size > v.y;
+
+    if (hitPlayer) {
+      if (v.good) {
+        powerFlash.timer = 14;
+        powerFlash.color = v.aura;
+
+        if (v.popupText) {
+          showPopup(v.popupText, v.aura);
+        }
+
+        if (v.power === "shieldClear") {
+          player.shield = 300;
+          valves = valves.filter(valve => valve.good);
+          score += currentStage === 2 ? 75 : 50;
+        }
+
+        if (v.power === "points") {
+          score += 25;
+        }
+
+        if (v.power === "speed") {
+          player.speedBoost = 240;
+          score += currentStage === 2 ? 60 : 40;
+        }
+
+        if (v.power === "heal") {
+          player.health = Math.min(6, player.health + 1);
+          score += 50;
+        }
+
+        score += 10;
+      } else {
+        if (player.shield <= 0) {
+          player.health -= stage.badDamage;
+          hitFlash = 15;
+        } else {
+          powerFlash.timer = 8;
+          powerFlash.color = "yellow";
+        }
+      }
+
+      valves.splice(i, 1);
+
+      if (player.health <= 0) {
+        gameOver = true;
+      }
+    } else if (v.y > canvas.height + 120) {
+      valves.splice(i, 1);
+      score += !v.good ? stage.badFallPoints : 1;
+    }
+  }
+}
+
+function drawTitleScreen() {
+  const t = Date.now() / 1000;
+
+  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  gradient.addColorStop(0, "#050505");
+  gradient.addColorStop(0.5, "#171717");
+  gradient.addColorStop(1, "#020202");
+
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (let p of titleParticles) {
+    ctx.fillStyle = `rgba(0, 229, 255, ${p.alpha})`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.save();
+  ctx.textAlign = "center";
+
+  ctx.fillStyle = "white";
+  ctx.font = "78px Arial";
+  ctx.shadowBlur = 22 + Math.sin(t * 3) * 8;
+  ctx.shadowColor = "red";
+  ctx.fillText("Valve Tycoon", canvas.width / 2, 120);
+
+  const taglineFloat = Math.sin(t * 1.5) * 5;
+  const taglineGlow = 12 + Math.sin(t * 3) * 7;
+
+  const textGradient = ctx.createLinearGradient(
+    canvas.width / 2 - 240,
+    0,
+    canvas.width / 2 + 240,
+    0
+  );
+
+  textGradient.addColorStop(0, "#00e5ff");
+  textGradient.addColorStop(0.5, "#ffffff");
+  textGradient.addColorStop(1, "#00e5ff");
+
+  ctx.fillStyle = textGradient;
+  ctx.font = "24px Arial";
+  ctx.shadowBlur = taglineGlow;
+  ctx.shadowColor = "#00e5ff";
+  ctx.fillText("The Application Dictates the Valve.", canvas.width / 2, 168 + taglineFloat);
+
+  ctx.restore();
+
+  const imageSize = 300 + Math.sin(t * 2.2) * 10;
+  const imageX = canvas.width / 2 - imageSize / 2;
+  const imageY = canvas.height / 2 - imageSize / 2 - 25 + Math.sin(t * 1.8) * 8;
+
+  ctx.save();
+
+  ctx.translate(canvas.width / 2, imageY + imageSize / 2);
+  ctx.rotate(Math.sin(t * 1.4) * 0.08);
+
+  ctx.shadowBlur = 38;
+  ctx.shadowColor = "red";
+
+  if (images.bad.complete && images.bad.naturalWidth > 0) {
+    ctx.drawImage(
+      images.bad,
+      -imageSize / 2,
+      -imageSize / 2,
+      imageSize,
+      imageSize
+    );
+  } else {
+    ctx.fillStyle = "red";
+    ctx.beginPath();
+    ctx.arc(0, 0, imageSize / 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+
+  playButton.x = canvas.width / 2 - playButton.width / 2;
+  playButton.y = imageY + imageSize + 50;
+
+  const hovering =
+    mouseX >= playButton.x &&
+    mouseX <= playButton.x + playButton.width &&
+    mouseY >= playButton.y &&
+    mouseY <= playButton.y + playButton.height;
+
+  ctx.save();
+
+  ctx.shadowBlur = hovering ? 34 : 20;
+  ctx.shadowColor = hovering ? "lime" : "cyan";
+  ctx.fillStyle = hovering ? "rgba(0, 220, 160, 0.95)" : "rgba(0, 180, 220, 0.85)";
+  ctx.fillRect(playButton.x, playButton.y, playButton.width, playButton.height);
+
+  ctx.strokeStyle = "white";
+  ctx.lineWidth = hovering ? 5 : 3;
+  ctx.strokeRect(playButton.x, playButton.y, playButton.width, playButton.height);
+
+  ctx.fillStyle = "white";
+  ctx.font = hovering ? "38px Arial" : "34px Arial";
+  ctx.textAlign = "center";
+  ctx.shadowBlur = 5;
+  ctx.shadowColor = "black";
+  ctx.fillText("PLAY", canvas.width / 2, playButton.y + 49);
+
+  ctx.font = "16px Arial";
+  ctx.fillText("Arrow keys / A-D to move", canvas.width / 2, playButton.y + 110);
+
+  ctx.restore();
+}
+
+function drawVictoryScreen() {
+  const t = Date.now() / 1000;
+
+  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  gradient.addColorStop(0, "#02110d");
+  gradient.addColorStop(0.5, "#061b15");
+  gradient.addColorStop(1, "#020202");
+
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (let c of victoryConfetti) {
+    ctx.save();
+    ctx.translate(c.x, c.y);
+    ctx.rotate(c.rotation);
+    ctx.fillStyle = c.color;
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = c.color;
+    ctx.fillRect(-c.size / 2, -c.size / 2, c.size, c.size * 1.7);
+    ctx.restore();
+  }
+
+  ctx.save();
+  ctx.textAlign = "center";
+
+  ctx.fillStyle = "white";
+  ctx.font = "68px Arial";
+  ctx.shadowBlur = 24 + Math.sin(t * 3) * 8;
+  ctx.shadowColor = "lime";
+  ctx.fillText("You're a Valve Expert!", canvas.width / 2, 115);
+
+  ctx.font = "24px Arial";
+  ctx.shadowBlur = 14;
+  ctx.shadowColor = "cyan";
+  ctx.fillStyle = "#dfffff";
+  ctx.fillText("You survived slurry, steam, and oilsands severe service.", canvas.width / 2, 160);
+
+  const size = 285 + Math.sin(t * 2.2) * 8;
+  const x = canvas.width / 2 - size / 2;
+  const y = canvas.height / 2 - size / 2 - 20 + Math.sin(t * 1.8) * 8;
+
+  ctx.shadowBlur = 38;
+  ctx.shadowColor = "cyan";
+
+  if (images.playerThumbs.complete && images.playerThumbs.naturalWidth > 0) {
+    ctx.drawImage(images.playerThumbs, x, y, size, size);
+  } else if (images.player.complete && images.player.naturalWidth > 0) {
+    ctx.drawImage(images.player, x, y, size, size);
+  } else {
+    ctx.fillStyle = "lime";
+    ctx.fillRect(x, y, size, size);
+  }
+
+  ctx.shadowBlur = 10;
+  ctx.shadowColor = "black";
+  ctx.fillStyle = "white";
+  ctx.font = "30px Arial";
+  ctx.fillText("Final Score: " + score, canvas.width / 2, y + size + 45);
+
+  backButton.x = canvas.width / 2 - backButton.width / 2;
+  backButton.y = y + size + 75;
+
+  const hovering =
+    mouseX >= backButton.x &&
+    mouseX <= backButton.x + backButton.width &&
+    mouseY >= backButton.y &&
+    mouseY <= backButton.y + backButton.height;
+
+  ctx.shadowBlur = hovering ? 34 : 18;
+  ctx.shadowColor = hovering ? "cyan" : "lime";
+  ctx.fillStyle = hovering ? "rgba(0, 229, 255, 0.95)" : "rgba(0, 190, 120, 0.9)";
+  ctx.fillRect(backButton.x, backButton.y, backButton.width, backButton.height);
+
+  ctx.strokeStyle = "white";
+  ctx.lineWidth = hovering ? 5 : 3;
+  ctx.strokeRect(backButton.x, backButton.y, backButton.width, backButton.height);
+
+  ctx.fillStyle = "white";
+  ctx.font = hovering ? "31px Arial" : "28px Arial";
+  ctx.shadowBlur = 5;
+  ctx.shadowColor = "black";
+  ctx.fillText("BACK TO TITLE", canvas.width / 2, backButton.y + 47);
+
+  ctx.restore();
+}
+
+function drawBackground(stage) {
+  if (stage.background && stage.background.complete && stage.background.naturalWidth > 0) {
+    ctx.drawImage(stage.background, 0, 0, canvas.width, canvas.height);
+  } else {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+}
+
+function drawPlayer() {
+  const cx = player.x + player.size / 2;
+  const cy = player.y + player.size / 2;
+
+  let ringColor = "cyan";
+  if (player.shield > 0) ringColor = "yellow";
+  else if (player.speedBoost > 0) ringColor = "lime";
+
+  ctx.save();
+
+  ctx.shadowBlur = 22;
+  ctx.shadowColor = ringColor;
+  ctx.strokeStyle = ringColor;
+  ctx.lineWidth = 7;
+  ctx.beginPath();
+  ctx.arc(cx, cy, player.size / 1.15, 0, Math.PI * 2);
+  ctx.stroke();
+
+  if (images.player.complete && images.player.naturalWidth > 0) {
+    ctx.drawImage(images.player, player.x, player.y, player.size, player.size);
+  } else {
+    ctx.fillStyle = "lime";
+    ctx.fillRect(player.x, player.y, player.size, player.size);
+  }
+
+  ctx.restore();
+}
+
+function drawValve(v) {
+  const centerX = v.x + v.size / 2;
+  const centerY = v.y + v.size / 2;
+  const pulseSize = v.good ? Math.sin(v.pulse) * 4 : 0;
+  const drawSize = v.size + pulseSize;
+  const auraColor = v.good ? v.aura : "red";
+
+  ctx.save();
+
+  ctx.shadowBlur = v.good ? 28 : 14;
+  ctx.shadowColor = auraColor;
+
+  ctx.translate(centerX, centerY);
+  ctx.rotate(v.rotation);
+
+  if (v.image && v.image.complete && v.image.naturalWidth > 0) {
+    ctx.drawImage(v.image, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
+  } else {
+    ctx.fillStyle = v.good ? auraColor : "red";
+    ctx.beginPath();
+    ctx.arc(0, 0, drawSize / 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+
+  ctx.save();
+  ctx.fillStyle = "white";
+  ctx.font = "bold 14px Arial";
+  ctx.textAlign = "center";
+  ctx.shadowBlur = 6;
+  ctx.shadowColor = "black";
+  ctx.fillText(v.name, centerX, v.y + v.size + 22);
+  ctx.restore();
+}
+
+function drawHUD(stage) {
+  ctx.save();
+
+  ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+  ctx.fillRect(10, 10, 430, 310);
+
+  ctx.fillStyle = "white";
+  ctx.font = "22px Arial";
+  ctx.textAlign = "left";
+  ctx.shadowBlur = 4;
+  ctx.shadowColor = "black";
+
+  ctx.fillText("Valve Tycoon", 25, 40);
+  ctx.fillText("Process: " + stage.name, 25, 75);
+  ctx.fillText("Condition: " + stage.condition, 25, 105);
+  ctx.fillText("Health: " + player.health + " / 6", 25, 140);
+  ctx.fillText("Score: " + score, 25, 170);
+  ctx.fillText("Time: " + timeLeft, 25, 200);
+  ctx.fillText("Bad valve escape: +" + stage.badFallPoints, 25, 230);
+
+  if (player.health <= 2) {
+    ctx.fillStyle = "red";
+    ctx.fillText("CRITICAL HEALTH", 25, 260);
+    ctx.fillStyle = "white";
+  }
+
+  if (player.shield > 0) {
+    ctx.fillText("Shield active", 25, 290);
+  } else if (player.speedBoost > 0) {
+    ctx.fillText("Speed boost active", 25, 290);
+  }
+
+  ctx.restore();
+}
+
+function drawScreenFlash() {
+  if (startFlash > 0) {
+    ctx.fillStyle = `rgba(255, 255, 255, ${startFlash / 35})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  if (hitFlash > 0) {
+    ctx.fillStyle = "rgba(255, 0, 0, 0.25)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  if (powerFlash.timer > 0) {
+    let flashColor = "rgba(0, 255, 255, 0.18)";
+    if (powerFlash.color === "yellow") flashColor = "rgba(255, 230, 0, 0.22)";
+    if (powerFlash.color === "cyan") flashColor = "rgba(0, 255, 255, 0.18)";
+    if (powerFlash.color === "lime") flashColor = "rgba(0, 255, 0, 0.18)";
+    if (powerFlash.color === "purple") flashColor = "rgba(180, 0, 255, 0.22)";
+
+    ctx.fillStyle = flashColor;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+}
+
+function drawPopup() {
+  if (popup.timer <= 0) return;
+
+  const progress = popup.timer / popup.maxTimer;
+  const alpha = Math.min(0.75, progress);
+  const scale = 1 + (1 - progress) * 0.28;
+  const floatY = (1 - progress) * -45;
+
+  let glowColor = popup.color;
+  let fillColor = "white";
+
+  if (popup.color === "yellow") fillColor = "#fff3a0";
+  if (popup.color === "cyan") fillColor = "#bfffff";
+  if (popup.color === "lime") fillColor = "#c8ffc8";
+  if (popup.color === "purple") fillColor = "#e0b8ff";
+
+  ctx.save();
+
+  ctx.globalAlpha = alpha;
+  ctx.translate(canvas.width / 2, canvas.height / 2 + floatY);
+  ctx.scale(scale, scale);
+
+  ctx.textAlign = "center";
+  ctx.font = "bold 54px Arial";
+  ctx.fillStyle = fillColor;
+  ctx.shadowBlur = 28;
+  ctx.shadowColor = glowColor;
+
+  ctx.fillText(popup.text, 0, 0);
+
+  ctx.font = "22px Arial";
+  ctx.globalAlpha = alpha * 0.45;
+  ctx.fillText("PNEUMATIC RESPONSE CONFIRMED", 0, 36);
+
+  ctx.restore();
+}
+
+function drawCenterMessage(title, subtitle1, subtitle2) {
+  ctx.save();
+
+  ctx.fillStyle = "white";
+  ctx.textAlign = "center";
+  ctx.shadowBlur = 8;
+  ctx.shadowColor = "black";
+
+  ctx.font = "48px Arial";
+  ctx.fillText(title, canvas.width / 2, canvas.height / 2);
+
+  ctx.font = "24px Arial";
+
+  if (subtitle1) {
+    ctx.fillText(subtitle1, canvas.width / 2, canvas.height / 2 + 40);
+  }
+
+  if (subtitle2) {
+    ctx.fillText(subtitle2, canvas.width / 2, canvas.height / 2 + 75);
+  }
+
+  ctx.restore();
+}
+
+function draw() {
+  if (gameState === "title") {
+    drawTitleScreen();
+    return;
+  }
+
+  if (gameState === "victory") {
+    drawVictoryScreen();
+    return;
+  }
+
+  const stage = stages[currentStage];
+
+  drawBackground(stage);
+  drawPlayer();
+
+  valves.forEach(drawValve);
+
+  drawScreenFlash();
+  drawHUD(stage);
+  drawPopup();
+
+  if (gameOver) {
+    drawCenterMessage("GAME OVER", "Refresh to restart", "");
+  }
+
+  if (stageWon) {
+    drawCenterMessage(
+      "PROCESS COMPLETE",
+      stage.name + " survived",
+      currentStage === stages.length - 1 ? "Press N to finish" : "Press N for next process"
+    );
+  }
+}
+
+function gameLoop() {
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>
