@@ -60,6 +60,9 @@ const titleFrameCount = 8;
 let titleParticles = [];
 let victoryConfetti = [];
 
+let explosionParticles = [];
+let explosionTriggered = false;
+
 function createTitleParticles() {
   titleParticles = [];
 
@@ -70,6 +73,24 @@ function createTitleParticles() {
       size: 1 + Math.random() * 3,
       speed: 0.2 + Math.random() * 0.7,
       alpha: 0.15 + Math.random() * 0.55
+    });
+  }
+}
+
+function createExplosion(x, y) {
+  explosionParticles = [];
+
+  const colors = ["red", "orange", "yellow", "white"];
+
+  for (let i = 0; i < 90; i++) {
+    explosionParticles.push({
+      x: x,
+      y: y,
+      vx: (Math.random() - 0.5) * 14,
+      vy: (Math.random() - 0.5) * 14,
+      size: 4 + Math.random() * 10,
+      life: 45 + Math.random() * 25,
+      color: colors[Math.floor(Math.random() * colors.length)]
     });
   }
 }
@@ -172,7 +193,7 @@ const stages = [
         power: "shieldClear",
         image: images.dss,
         aura: "yellow",
-        popupText: "Shield + Clear!"
+        popupText: "Shield + Clear + Bonus Points!"
       },
       {
         name: "Pinch",
@@ -203,14 +224,14 @@ const stages = [
         power: "shieldClear",
         image: images.msBall,
         aura: "yellow",
-        popupText: "Shield + Clear!"
+        popupText: "Shield + Clear + Bonus Points!"
       },
       {
         name: "Triple Offset",
         power: "speed",
         image: images.tripleOffset,
         aura: "lime",
-        popupText: "Speed Boost!"
+        popupText: "Speed Boost + Bonus Points!"
       },
       {
         name: "Globe",
@@ -242,21 +263,21 @@ const stages = [
         power: "shieldClear",
         image: images.dssActuated,
         aura: "yellow",
-        popupText: "Shield + Clear!"
+        popupText: "Shield + Clear + Bonus Points!"
       },
       {
-        name: "Pneumatic Triple Act.",
+        name: "Pneumatic Triple Offset",
         power: "speed",
         image: images.tripleOffsetActuated,
         aura: "lime",
-        popupText: "Actuated Speed!"
+        popupText: "Speed Boost + Bonus Points"
       },
       {
         name: "Pneumatic Metal Seated",
         power: "heal",
         image: images.msBallActuated,
         aura: "purple",
-        popupText: "Health +1!"
+        popupText: "Health +1 + Bonus Points!"
       }
     ]
   }
@@ -322,7 +343,9 @@ function resetGame() {
   hitFlash = 0;
   powerFlash.timer = 0;
   popup.timer = 0;
-
+  explosionParticles = [];
+  explosionTriggered = false;
+  
   player.health = 6;
   player.shield = 0;
   player.speedBoost = 0;
@@ -355,6 +378,20 @@ function nextStage() {
   player.y = canvas.height - 100;
 }
 
+function drawExplosion() {
+  for (let p of explosionParticles) {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, p.life / 70);
+    ctx.fillStyle = p.color;
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
 function spawnValve() {
   if (gameState !== "playing" || gameOver || stageWon) return;
 
@@ -365,21 +402,21 @@ function spawnValve() {
     ? stage.goodValves[Math.floor(Math.random() * stage.goodValves.length)]
     : stage.badValves[Math.floor(Math.random() * stage.badValves.length)];
 
-  valves.push({
-    x: Math.random() * (canvas.width - 90),
-    y: -110,
-    size: currentStage === 2 ? 100 : 90,
-    speed: isGood ? 3 : (4 + Math.random() * 3) * stage.badSpeedMultiplier,
-    good: isGood,
-    name: type.name,
-    power: type.power || null,
-    image: type.image,
-    aura: type.aura || "red",
-    popupText: type.popupText || "",
-    rotation: Math.random() * Math.PI * 2,
-    spin: (Math.random() - 0.5) * 0.08,
-    pulse: Math.random() * Math.PI * 2
-  });
+valves.push({
+  x: Math.random() * (canvas.width - 90),
+  y: -110,
+  size: currentStage === 2 ? 100 : 90,
+  speed: isGood ? 3 : (4 + Math.random() * 3) * stage.badSpeedMultiplier,
+  good: isGood,
+  name: isGood ? type.name : "Process Killer",
+  power: type.power || null,
+  image: type.image,
+  aura: type.aura || "red",
+  popupText: type.popupText || "",
+  rotation: Math.random() * Math.PI * 2,
+  spin: (Math.random() - 0.5) * 0.08,
+  pulse: Math.random() * Math.PI * 2
+});
 }
 
 setInterval(() => {
@@ -419,6 +456,21 @@ function updateVictoryConfetti() {
   }
 }
 
+function updateExplosion() {
+  for (let i = explosionParticles.length - 1; i >= 0; i--) {
+    let p = explosionParticles[i];
+
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.15;
+    p.life--;
+
+    if (p.life <= 0) {
+      explosionParticles.splice(i, 1);
+    }
+  }
+}
+
 function update() {
   if (gameState === "title") {
     titleFrameTimer++;
@@ -438,6 +490,11 @@ function update() {
   }
 
   if (startFlash > 0) startFlash--;
+
+  if (gameOver) {
+  updateExplosion();
+  return;
+}
 
   if (gameOver || stageWon) return;
 
@@ -522,8 +579,14 @@ function update() {
 
       valves.splice(i, 1);
 
-      if (player.health <= 0) {
+      if (player.health <= 0 && !explosionTriggered) {
+        explosionTriggered = true;
         gameOver = true;
+
+        createExplosion(
+          player.x + player.size / 2,
+          player.y + player.size / 2
+        );
       }
     } else if (v.y > canvas.height + 120) {
       valves.splice(i, 1);
@@ -891,7 +954,7 @@ function drawPopup() {
 
   ctx.font = "22px Arial";
   ctx.globalAlpha = alpha * 0.45;
-  ctx.fillText("PNEUMATIC RESPONSE CONFIRMED", 0, 36);
+  ctx.fillText("RIGHT VALVE FOR THE JOB!", 0, 36);
 
   ctx.restore();
 }
@@ -943,6 +1006,7 @@ function draw() {
   drawPopup();
 
   if (gameOver) {
+    drawExplosion();
     drawCenterMessage("GAME OVER", "Refresh to restart", "");
   }
 
